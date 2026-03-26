@@ -105,7 +105,7 @@ def init_monitor():
                 # Redirect output to /dev/null to avoid disk usage
                 devnull = open(os.devnull, "w")
                 self.stream_process = subprocess.Popen(
-                    ["./stream.sh"],
+                    ["bash", "./stream.sh"],
                     stdout=devnull,
                     stderr=devnull,
                     env=env,
