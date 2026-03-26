@@ -1,0 +1,14 @@
+xvfb
+x11vnc
+x11-utils
+xdotool
+wget
+gnupg
+curl
+ffmpeg
+dnsutils
+jq
+pulseaudio
+dbus-x11
+chromium
+fonts-liberation
