@@ -26,7 +26,7 @@ def load_config():
         "resolution": os.environ.get("RESOLUTION", "1920x1080"),
         "bitrate": os.environ.get("BITRATE", "5000k"),
         "fps": os.environ.get("FPS", "30"),
-        "zoom": os.environ.get("ZOOM", "1.0"),
+        "zoom": os.environ.get("ZOOM", "1.5"),
         "overlay_url": os.environ.get("OVERLAY_URL",
             "https://streamelements.com/overlay/68ae13eaceb05ce7a084a618/JX6ewgq8Pmqkp6EvngSMZZEKAk5dSAGWDGsd1pH7ooSjaPsY")
     }
