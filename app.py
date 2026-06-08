@@ -22,7 +22,7 @@ def load_config():
     # Default config
     return {
         "enabled": True,
-        "rtmp_url": os.environ.get("RTMP_URL", "rtmp://x.rtmp.youtube.com/live2/xfy3-p65p-p1hq-041p-buxw"),
+        "rtmp_url": os.environ.get("RTMP_URL", "rtmp://x.rtmp.youtube.com/live2/xfy3-p65p-p1hq-041p-buxw, rtmp://live.twitch.tv/app/live_1352303410_mZ5822JKsRM1U8Uw7B1xM5QK9OK8JX"),
         "resolution": os.environ.get("RESOLUTION", "1920x1080"),
         "bitrate": os.environ.get("BITRATE", "5000k"),
         "fps": os.environ.get("FPS", "30"),
@@ -173,18 +173,25 @@ else:
 
 with st.expander("Stream Configuration", expanded=True):
     # Setup safe masking for display similar to the original JS function
-    def mask_rtmp_url(url):
-        if url:
+    def mask_rtmp_url(url_string):
+        if not url_string:
+            return ""
+        # Split by comma or space
+        urls = [u.strip() for u in url_string.replace(",", " ").split() if u.strip()]
+        masked_urls = []
+        for url in urls:
             parts = url.split('/')
             if len(parts) > 4:
                 key = parts[-1]
                 masked_key = key[:4] + "••••-••••-••••-••••"
-                return "/".join(parts[:-1]) + "/" + masked_key
-        return (url[:20] + "...") if url else ""
+                masked_urls.append("/".join(parts[:-1]) + "/" + masked_key)
+            else:
+                masked_urls.append((url[:20] + "...") if url else "")
+        return ", ".join(masked_urls)
 
     col_url1, col_url2 = st.columns(2)
     with col_url1:
-        st.text_input("RTMP Destination (Masked) 🔒", value=mask_rtmp_url(config.get("rtmp_url")), disabled=True, help="Protected — edit via Space Secrets")
+        st.text_input("RTMP Destinations (Masked) 🔒", value=mask_rtmp_url(config.get("rtmp_url")), disabled=True, help="Protected — edit via Space Secrets (supports multiple comma-separated URLs)")
     with col_url2:
         overlay_val = config.get("overlay_url", "")
         # truncate overlay for display as original did
