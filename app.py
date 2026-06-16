@@ -51,7 +51,7 @@ def generate_wrapper_html(overlay_url):
         #ist-clock {{
             position: fixed;
             top: 40%;
-            right: 20%;
+            right: 50%;
             transform: translateY(-50%);
             z-index: 999999;
             font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
