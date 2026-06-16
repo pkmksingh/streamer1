@@ -48,13 +48,57 @@ def generate_wrapper_html(overlay_url):
         iframe {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }}
         #dashboard {{ z-index: 1; }}
         #overlay {{ z-index: 10; pointer-events: none; background: transparent; }}
+        #ist-clock {{
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 26px;
+            font-weight: 600;
+            color: #ffffff;
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            letter-spacing: 0.5px;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }}
     </style>
 </head>
 <body>
     <div class="container">
+        <div id="ist-clock">--:-- -- ist</div>
         <iframe src="{DASHBOARD_URL}" id="dashboard" allow="autoplay; encrypted-media"></iframe>
         <iframe src="{overlay_url}" id="overlay"></iframe>
     </div>
+    <script>
+        function updateTime() {{
+            const options = {{
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            }};
+            try {{
+                const formatter = new Intl.DateTimeFormat('en-US', options);
+                let timeStr = formatter.format(new Date());
+                timeStr = timeStr.toLowerCase();
+                document.getElementById('ist-clock').textContent = timeStr + ' ist';
+            }} catch (e) {{
+                console.error(e);
+            }}
+        }}
+        setInterval(updateTime, 1000);
+        updateTime();
+    </script>
 </body>
 </html>"""
     with open("wrapper.html", "w") as f:
