@@ -92,7 +92,7 @@ def generate_wrapper_html(overlay_url):
                 const formatter = new Intl.DateTimeFormat('en-US', options);
                 let timeStr = formatter.format(new Date());
                 timeStr = timeStr.toLowerCase();
-                document.getElementById('ist-clock').textContent = timeStr + ' ist';
+                document.getElementById('ist-clock').textContent = timeStr + ' IST';
             }} catch (e) {{
                 console.error(e);
             }}
