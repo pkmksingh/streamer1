@@ -51,9 +51,9 @@ def generate_wrapper_html(overlay_url):
         #ist-clock {{
             position: absolute;
             top: 50%;
-            right: 20px;
+            right: 40px;
             transform: translateY(-50%);
-            z-index: 100;
+            z-index: 99999;
             font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             font-size: 26px;
             font-weight: 600;
@@ -76,9 +76,9 @@ def generate_wrapper_html(overlay_url):
 </head>
 <body>
     <div class="container">
-        <div id="ist-clock">--:-- -- ist</div>
         <iframe src="{DASHBOARD_URL}" id="dashboard" allow="autoplay; encrypted-media"></iframe>
         <iframe src="{overlay_url}" id="overlay"></iframe>
+        <div id="ist-clock">--:-- -- ist</div>
     </div>
     <script>
         function updateTime() {{
