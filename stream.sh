@@ -129,7 +129,7 @@ while true; do
         eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
             $AUDIO_INPUT \
             -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-            -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
+            -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
             -g 60 -keyint_min 60 -sc_threshold 0 \
             $AUDIO_CODEC \
             -f flv "\"$SINGLE_URL\""
@@ -141,7 +141,7 @@ while true; do
         eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
             $AUDIO_INPUT \
             -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-            -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
+            -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
             -g 60 -keyint_min 60 -sc_threshold 0 \
             $AUDIO_CODEC \
             -f tee -map 0:v -map 1:a "\"$JOINED_OUTPUTS\""
