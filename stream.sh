@@ -72,43 +72,6 @@ fi
 # Split RTMP_URL by comma or space
 IFS=', ' read -r -a URL_ARRAY <<< "$RTMP_URL"
 
-TEE_OUTPUTS=()
-RESOLVED_URLS=()
-for URL in "${URL_ARRAY[@]}"; do
-    # Trim whitespace
-    URL=$(echo "$URL" | xargs)
-    if [ -z "$URL" ]; then
-        continue
-    fi
-    
-    # Extract hostname for DNS check
-    HOSTNAME=$(echo "$URL" | sed -e 's|rtmp://||' -e 's|/.*||')
-    echo "Checking DNS for $HOSTNAME..."
-    
-    RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
-    
-    if [ -z "$RESOLVED_IP" ]; then
-        echo "WARNING: System resolver failed for $HOSTNAME. Trying DNS-over-HTTPS (Cloudflare)..."
-        RESOLVED_IP=$(curl -s -H "accept: application/dns-json" "https://cloudflare-dns.com/dns-query?name=$HOSTNAME&type=A" | jq -r '.Answer[0].data // empty')
-        
-        if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
-            echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP via DoH."
-            # Update URL to use IP
-            URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
-        else
-            echo "ERROR: DoH resolution also failed for $HOSTNAME. Skipping this destination."
-            continue
-        fi
-    fi
-    RESOLVED_URLS+=("$URL")
-    TEE_OUTPUTS+=("[f=flv]${URL}")
-done
-
-if [ ${#RESOLVED_URLS[@]} -eq 0 ]; then
-    echo "ERROR: No valid RTMP destinations resolved."
-    exit 1
-fi
-
 # Audio: use dummy by default or mp3 if available and requested  
 AUDIO_FILE=${AUDIO_FILE:-"Cool Revenge.mp3"}
 if [ "${USE_DUMMY_AUDIO:-0}" = "1" ] || [ ! -f "$AUDIO_FILE" ]; then
@@ -119,26 +82,80 @@ else
     AUDIO_CODEC="-c:a aac -b:a 192k -ar 44100"
 fi
 
-if [ ${#RESOLVED_URLS[@]} -eq 1 ]; then
-    SINGLE_URL="${RESOLVED_URLS[0]}"
-    echo "Starting FFmpeg 4K stream with looped audio to single destination: $SINGLE_URL..."
-    eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
-        $AUDIO_INPUT \
-        -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-        -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
-        -g 60 -keyint_min 60 -sc_threshold 0 \
-        $AUDIO_CODEC \
-        -f flv "\"$SINGLE_URL\""
-else
-    # Join TEE_OUTPUTS with '|'
-    printf -v JOINED_OUTPUTS "%s|" "${TEE_OUTPUTS[@]}"
-    JOINED_OUTPUTS="${JOINED_OUTPUTS%|}" # remove trailing '|'
-    echo "Starting FFmpeg 4K stream with looped audio to multiple destinations using tee muxer..."
-    eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
-        $AUDIO_INPUT \
-        -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-        -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
-        -g 60 -keyint_min 60 -sc_threshold 0 \
-        $AUDIO_CODEC \
-        -f tee -map 0:v -map 1:a "\"$JOINED_OUTPUTS\""
-fi
+echo "Starting stream control loop..."
+
+while true; do
+    TEE_OUTPUTS=()
+    RESOLVED_URLS=()
+    for URL in "${URL_ARRAY[@]}"; do
+        # Trim whitespace
+        URL=$(echo "$URL" | xargs)
+        if [ -z "$URL" ]; then
+            continue
+        fi
+        
+        # Extract hostname for DNS check
+        HOSTNAME=$(echo "$URL" | sed -e 's|rtmp://||' -e 's|/.*||')
+        echo "Checking DNS for $HOSTNAME..."
+        
+        RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+        
+        if [ -z "$RESOLVED_IP" ]; then
+            echo "WARNING: System resolver failed for $HOSTNAME. Trying DNS-over-HTTPS (Cloudflare)..."
+            RESOLVED_IP=$(curl -s -H "accept: application/dns-json" "https://cloudflare-dns.com/dns-query?name=$HOSTNAME&type=A" | jq -r '.Answer[0].data // empty')
+            
+            if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
+                echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP via DoH."
+                # Update URL to use IP
+                URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
+            else
+                echo "ERROR: DoH resolution also failed for $HOSTNAME. Skipping this destination."
+                continue
+            fi
+        fi
+        RESOLVED_URLS+=("$URL")
+        TEE_OUTPUTS+=("[f=flv]${URL}")
+    done
+
+    if [ ${#RESOLVED_URLS[@]} -eq 0 ]; then
+        echo "ERROR: No valid RTMP destinations resolved. Retrying DNS check in 10 seconds..."
+        sleep 10
+        continue
+    fi
+
+    if [ ${#RESOLVED_URLS[@]} -eq 1 ]; then
+        SINGLE_URL="${RESOLVED_URLS[0]}"
+        echo "Starting FFmpeg 4K stream with looped audio to single destination: $SINGLE_URL..."
+        eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
+            $AUDIO_INPUT \
+            -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
+            -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
+            -g 60 -keyint_min 60 -sc_threshold 0 \
+            $AUDIO_CODEC \
+            -f flv "\"$SINGLE_URL\""
+    else
+        # Join TEE_OUTPUTS with '|'
+        printf -v JOINED_OUTPUTS "%s|" "${TEE_OUTPUTS[@]}"
+        JOINED_OUTPUTS="${JOINED_OUTPUTS%|}" # remove trailing '|'
+        echo "Starting FFmpeg 4K stream with looped audio to multiple destinations using tee muxer..."
+        eval ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
+            $AUDIO_INPUT \
+            -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
+            -b:v $BITRATE -maxrate $BITRATE -bufsize 30000k \
+            -g 60 -keyint_min 60 -sc_threshold 0 \
+            $AUDIO_CODEC \
+            -f tee -map 0:v -map 1:a "\"$JOINED_OUTPUTS\""
+    fi
+
+    FFMPEG_EXIT_CODE=$?
+    echo "FFmpeg exited with code $FFMPEG_EXIT_CODE."
+
+    # If killed by SIGINT (130) or SIGTERM (143)
+    if [ $FFMPEG_EXIT_CODE -eq 130 ] || [ $FFMPEG_EXIT_CODE -eq 143 ] || [ $FFMPEG_EXIT_CODE -eq 255 ]; then
+        echo "FFmpeg was terminated by user or system signal. Exiting stream script."
+        break
+    fi
+
+    echo "Stream connection lost or FFmpeg failed. Restarting FFmpeg in 5 seconds..."
+    sleep 5
+done
