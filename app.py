@@ -245,13 +245,13 @@ with st.expander("Stream Configuration", expanded=True):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        res_options = ["3840x2160", "1920x1080", "1280x720"]
-        res_current = config.get("resolution", "3840x2160")
+        res_options = ["1920x1080", "3840x2160", "1280x720"]
+        res_current = config.get("resolution", "1920x1080")
         res_index = res_options.index(res_current) if res_current in res_options else 0
         resolution = st.selectbox("Resolution", res_options, index=res_index)
         
     with col2:
-        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "15000k"))
+        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "5000k"))
         
     with col3:
         fps = st.number_input("FPS", min_value=10, max_value=60, value=int(config.get("fps", 30)))
