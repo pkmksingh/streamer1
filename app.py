@@ -110,11 +110,35 @@ def init_monitor():
     class StreamManager:
         def __init__(self):
             self.stream_process = None
+            self.http_port = self.start_http_server()
+            
             self.thread = threading.Thread(target=self.monitor_stream, daemon=True)
             self.thread.start()
             
             self.keep_alive_thread = threading.Thread(target=self.keep_alive, daemon=True)
             self.keep_alive_thread.start()
+            
+        def start_http_server(self):
+            import http.server
+            import socketserver
+            
+            class Handler(http.server.SimpleHTTPRequestHandler):
+                def log_message(self, format, *args):
+                    pass  # Suppress logging
+            
+            for port in range(8000, 8080):
+                try:
+                    # Allow address reuse
+                    socketserver.TCPServer.allow_reuse_address = True
+                    httpd = socketserver.TCPServer(("", port), Handler)
+                    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+                    t.start()
+                    print(f"[monitor] Local HTTP server started on port {port}", flush=True)
+                    return port
+                except Exception as e:
+                    print(f"[monitor] Port {port} failed: {e}", flush=True)
+                    continue
+            return None
             
         def keep_alive(self):
             import urllib.request
@@ -137,8 +161,11 @@ def init_monitor():
         def start_stream_logic(self, config):
             env = os.environ.copy()
             generate_wrapper_html(config['overlay_url'])
-            # Point Chrome to the locally generated wrapper.html
-            env["STREAM_URL"] = f"file://{os.path.abspath('wrapper.html')}"
+            # Point Chrome to the locally generated wrapper.html via local server
+            if self.http_port:
+                env["STREAM_URL"] = f"http://localhost:{self.http_port}/wrapper.html"
+            else:
+                env["STREAM_URL"] = f"file://{os.path.abspath('wrapper.html')}"
             env["RTMP_URL"] = config["rtmp_url"]
             env["RESOLUTION"] = config["resolution"]
             env["BITRATE"] = config["bitrate"]
@@ -147,12 +174,12 @@ def init_monitor():
             env["USE_DUMMY_AUDIO"] = "0"  # use mp3 if available, else fallback
 
             try:
-                # Redirect output to /dev/null to avoid disk usage
-                devnull = open(os.devnull, "w")
+                # Redirect output to stream.log to help troubleshoot
+                log_file = open("stream.log", "w")
                 self.stream_process = subprocess.Popen(
                     ["bash", "./stream.sh"],
-                    stdout=devnull,
-                    stderr=devnull,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
                     env=env,
                     preexec_fn=os.setsid
                 )
@@ -284,7 +311,7 @@ st.header("Dashboard Preview")
 
 # Display the dashboard utilizing the preview scale parameter
 scaled_html = f'''
-<div style="overflow: hidden; border-radius: 0.5rem; background: #000; width: 100%;">
+<div style="overflow: hidden; border-radius: 0.5rem; background: #000; width: 100%; height: 600px;">
     <iframe src="{DASHBOARD_URL}" 
         style="
             transform: scale({preview_scale}); 
@@ -297,4 +324,16 @@ scaled_html = f'''
 </div>
 '''
 
-st.components.v1.html(scaled_html, height=600)
+if hasattr(st, "html"):
+    st.html(scaled_html)
+else:
+    st.markdown(scaled_html, unsafe_allow_html=True)
+
+st.header("Stream Logs")
+with st.expander("Show Stream Diagnostic Logs", expanded=True):
+    if os.path.exists("stream.log"):
+        with open("stream.log", "r") as f:
+            log_lines = f.readlines()
+            st.code("".join(log_lines[-100:]), language="text")
+    else:
+        st.info("No logs generated yet. Start the stream to view logs.")

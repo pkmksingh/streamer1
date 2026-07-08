@@ -16,6 +16,7 @@ cleanup() {
     echo "Cleaning up..."
     kill $(jobs -p) 2>/dev/null
     rm -f /tmp/.X99-lock
+    rm -rf /tmp/chrome-data-$$
 }
 trap cleanup EXIT
 
@@ -34,7 +35,7 @@ sleep 2
 export DISPLAY=$DISPLAY_NUM
 
 
-# 3. Start Chromium in Kiosk Mode (suppress all logs)
+# 3. Start Chromium in Kiosk Mode
 echo "Starting Chromium in kiosk mode..."
 # Extract width and height from RESOLUTION (e.g., 3840x2160 -> 3840, 2160)
 W=$(echo $RESOLUTION | cut -d'x' -f1)
@@ -44,7 +45,7 @@ chromium \
     --no-sandbox \
     --disable-setuid-sandbox \
     --kiosk \
-    --user-data-dir=/tmp/chrome-data \
+    --user-data-dir=/tmp/chrome-data-$$ \
     --force-device-scale-factor=$ZOOM \
     --window-size=$W,$H \
     --window-position=0,0 \
@@ -56,11 +57,12 @@ chromium \
     --autoplay-policy=no-user-gesture-required \
     --no-zygote \
     --disable-gpu \
-    --disable-features=VizDisplayCompositor \
+    --disable-web-security \
+    --disable-features=IsolateOrigins,site-per-process \
     --remote-debugging-port=9222 \
-    --log-level=3 \
+    --log-level=0 \
     --silent-debugger-extension-api \
-    "$URL" > /dev/null 2>&1 &
+    "$URL" &
 sleep 30
 
 # 3. Start FFmpeg
