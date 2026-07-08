@@ -29,7 +29,8 @@ pactl set-default-sink dummy_sink 2>/dev/null || true
 
 # 2. Start Xvfb
 echo "Starting Xvfb on $DISPLAY_NUM with $RESOLUTION..."
-Xvfb $DISPLAY_NUM -screen 0 ${RESOLUTION}x${DEPTH} > /dev/null 2>&1 &
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+Xvfb $DISPLAY_NUM -screen 0 ${RESOLUTION}x${DEPTH} -ac +extension GLX +render -noreset &
 sleep 2
 
 export DISPLAY=$DISPLAY_NUM

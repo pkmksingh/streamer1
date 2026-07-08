@@ -8,7 +8,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 # Global state
-CONFIG_FILE = "stream_config.json"
+CONFIG_FILE = "/tmp/stream_config.json"
 DASHBOARD_URL = "https://datamk-trading-pulse.hf.space"
 
 def load_config():
@@ -102,7 +102,7 @@ def generate_wrapper_html(overlay_url):
     </script>
 </body>
 </html>"""
-    with open("wrapper.html", "w") as f:
+    with open("/tmp/wrapper.html", "w") as f:
         f.write(html)
 
 @st.cache_resource
@@ -123,6 +123,19 @@ def init_monitor():
             import socketserver
             
             class Handler(http.server.SimpleHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path == "/wrapper.html" or self.path == "/":
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html")
+                        self.end_headers()
+                        try:
+                            with open("/tmp/wrapper.html", "rb") as f:
+                                self.wfile.write(f.read())
+                        except Exception as e:
+                            self.wfile.write(f"Error reading wrapper: {e}".encode())
+                    else:
+                        super().do_GET()
+                        
                 def log_message(self, format, *args):
                     pass  # Suppress logging
             
@@ -130,7 +143,7 @@ def init_monitor():
                 try:
                     # Allow address reuse
                     socketserver.TCPServer.allow_reuse_address = True
-                    httpd = socketserver.TCPServer(("", port), Handler)
+                    httpd = socketserver.TCPServer(("127.0.0.1", port), Handler)
                     t = threading.Thread(target=httpd.serve_forever, daemon=True)
                     t.start()
                     print(f"[monitor] Local HTTP server started on port {port}", flush=True)
@@ -163,9 +176,9 @@ def init_monitor():
             generate_wrapper_html(config['overlay_url'])
             # Point Chrome to the locally generated wrapper.html via local server
             if self.http_port:
-                env["STREAM_URL"] = f"http://localhost:{self.http_port}/wrapper.html"
+                env["STREAM_URL"] = f"http://127.0.0.1:{self.http_port}/wrapper.html"
             else:
-                env["STREAM_URL"] = f"file://{os.path.abspath('wrapper.html')}"
+                env["STREAM_URL"] = f"file:///tmp/wrapper.html"
             env["RTMP_URL"] = config["rtmp_url"]
             env["RESOLUTION"] = config["resolution"]
             env["BITRATE"] = config["bitrate"]
@@ -175,7 +188,7 @@ def init_monitor():
 
             try:
                 # Redirect output to stream.log to help troubleshoot
-                log_file = open("stream.log", "w")
+                log_file = open("/tmp/stream.log", "w")
                 self.stream_process = subprocess.Popen(
                     ["bash", "./stream.sh"],
                     stdout=log_file,
@@ -331,8 +344,8 @@ else:
 
 st.header("Stream Logs")
 with st.expander("Show Stream Diagnostic Logs", expanded=True):
-    if os.path.exists("stream.log"):
-        with open("stream.log", "r") as f:
+    if os.path.exists("/tmp/stream.log"):
+        with open("/tmp/stream.log", "r") as f:
             log_lines = f.readlines()
             st.code("".join(log_lines[-100:]), language="text")
     else:
