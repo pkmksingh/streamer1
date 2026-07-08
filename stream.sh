@@ -56,7 +56,6 @@ chromium \
     --no-first-run \
     --hide-scrollbars \
     --autoplay-policy=no-user-gesture-required \
-    --no-zygote \
     --disable-gpu \
     --disable-web-security \
     --disable-features=IsolateOrigins,site-per-process \
