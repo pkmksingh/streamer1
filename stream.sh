@@ -98,22 +98,33 @@ while true; do
         
         # Extract hostname for DNS check
         HOSTNAME=$(echo "$URL" | sed -e 's|rtmp://||' -e 's|/.*||')
-        echo "Checking DNS for $HOSTNAME..."
+        echo "Resolving DNS for $HOSTNAME using external resolvers..."
         
-        RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+        # 1. Try dig with Cloudflare DNS
+        RESOLVED_IP=$(dig +short @1.1.1.1 "$HOSTNAME" | grep -E '^[0-9.]+$' | head -n1)
         
+        # 2. Try dig with Google DNS
         if [ -z "$RESOLVED_IP" ]; then
-            echo "WARNING: System resolver failed for $HOSTNAME. Trying DNS-over-HTTPS (Cloudflare)..."
+            RESOLVED_IP=$(dig +short @8.8.8.8 "$HOSTNAME" | grep -E '^[0-9.]+$' | head -n1)
+        fi
+        
+        # 3. Try Cloudflare DNS-over-HTTPS
+        if [ -z "$RESOLVED_IP" ]; then
             RESOLVED_IP=$(curl -s -H "accept: application/dns-json" "https://cloudflare-dns.com/dns-query?name=$HOSTNAME&type=A" | jq -r '.Answer[0].data // empty')
-            
-            if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
-                echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP via DoH."
-                # Update URL to use IP
-                URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
-            else
-                echo "ERROR: DoH resolution also failed for $HOSTNAME. Skipping this destination."
-                continue
-            fi
+        fi
+        
+        # 4. Fallback to system resolver
+        if [ -z "$RESOLVED_IP" ] || [ "$RESOLVED_IP" = "null" ]; then
+            RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+        fi
+
+        if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
+            echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP"
+            # Update URL to use IP
+            URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
+        else
+            echo "ERROR: DNS resolution failed for $HOSTNAME. Skipping this destination."
+            continue
         fi
         RESOLVED_URLS+=("$URL")
         TEE_OUTPUTS+=("[f=flv]${URL}")
