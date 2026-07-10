@@ -8,7 +8,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 # Global state
-CONFIG_FILE = "/tmp/stream_config.json"
+CONFIG_FILE = "stream_config.json"
 DASHBOARD_URL = "https://datamk-trading-pulse.hf.space"
 
 def load_config():
@@ -102,7 +102,7 @@ def generate_wrapper_html(overlay_url):
     </script>
 </body>
 </html>"""
-    with open("/tmp/wrapper.html", "w") as f:
+    with open("wrapper.html", "w") as f:
         f.write(html)
 
 @st.cache_resource
@@ -110,48 +110,11 @@ def init_monitor():
     class StreamManager:
         def __init__(self):
             self.stream_process = None
-            self.http_port = self.start_http_server()
-            
             self.thread = threading.Thread(target=self.monitor_stream, daemon=True)
             self.thread.start()
             
             self.keep_alive_thread = threading.Thread(target=self.keep_alive, daemon=True)
             self.keep_alive_thread.start()
-            
-        def start_http_server(self):
-            import http.server
-            import socketserver
-            
-            class Handler(http.server.SimpleHTTPRequestHandler):
-                def do_GET(self):
-                    if self.path == "/wrapper.html" or self.path == "/":
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html")
-                        self.end_headers()
-                        try:
-                            with open("/tmp/wrapper.html", "rb") as f:
-                                self.wfile.write(f.read())
-                        except Exception as e:
-                            self.wfile.write(f"Error reading wrapper: {e}".encode())
-                    else:
-                        super().do_GET()
-                        
-                def log_message(self, format, *args):
-                    pass  # Suppress logging
-            
-            for port in range(8000, 8080):
-                try:
-                    # Allow address reuse
-                    socketserver.TCPServer.allow_reuse_address = True
-                    httpd = socketserver.TCPServer(("127.0.0.1", port), Handler)
-                    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-                    t.start()
-                    print(f"[monitor] Local HTTP server started on port {port}", flush=True)
-                    return port
-                except Exception as e:
-                    print(f"[monitor] Port {port} failed: {e}", flush=True)
-                    continue
-            return None
             
         def keep_alive(self):
             import urllib.request
@@ -174,11 +137,8 @@ def init_monitor():
         def start_stream_logic(self, config):
             env = os.environ.copy()
             generate_wrapper_html(config['overlay_url'])
-            # Point Chrome to the locally generated wrapper.html via local server
-            if self.http_port:
-                env["STREAM_URL"] = f"http://127.0.0.1:{self.http_port}/wrapper.html"
-            else:
-                env["STREAM_URL"] = f"file:///tmp/wrapper.html"
+            # Point Chrome to the locally generated wrapper.html
+            env["STREAM_URL"] = f"file://{os.path.abspath('wrapper.html')}"
             env["RTMP_URL"] = config["rtmp_url"]
             env["RESOLUTION"] = config["resolution"]
             env["BITRATE"] = config["bitrate"]
@@ -187,12 +147,12 @@ def init_monitor():
             env["USE_DUMMY_AUDIO"] = "0"  # use mp3 if available, else fallback
 
             try:
-                # Redirect output to stream.log to help troubleshoot
-                log_file = open("/tmp/stream.log", "w")
+                # Redirect output to /dev/null to avoid disk usage
+                devnull = open(os.devnull, "w")
                 self.stream_process = subprocess.Popen(
                     ["bash", "./stream.sh"],
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
+                    stdout=devnull,
+                    stderr=devnull,
                     env=env,
                     preexec_fn=os.setsid
                 )
@@ -285,13 +245,13 @@ with st.expander("Stream Configuration", expanded=True):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        res_options = ["3840x2160", "1920x1080", "1280x720"]
-        res_current = config.get("resolution", "3840x2160")
+        res_options = ["1920x1080", "3840x2160", "1280x720"]
+        res_current = config.get("resolution", "1920x1080")
         res_index = res_options.index(res_current) if res_current in res_options else 0
         resolution = st.selectbox("Resolution", res_options, index=res_index)
         
     with col2:
-        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "15000k"))
+        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "5000k"))
         
     with col3:
         fps = st.number_input("FPS", min_value=10, max_value=60, value=int(config.get("fps", 30)))
@@ -324,7 +284,7 @@ st.header("Dashboard Preview")
 
 # Display the dashboard utilizing the preview scale parameter
 scaled_html = f'''
-<div style="overflow: hidden; border-radius: 0.5rem; background: #000; width: 100%; height: 600px;">
+<div style="overflow: hidden; border-radius: 0.5rem; background: #000; width: 100%;">
     <iframe src="{DASHBOARD_URL}" 
         style="
             transform: scale({preview_scale}); 
@@ -337,16 +297,4 @@ scaled_html = f'''
 </div>
 '''
 
-if hasattr(st, "html"):
-    st.html(scaled_html)
-else:
-    st.markdown(scaled_html, unsafe_allow_html=True)
-
-st.header("Stream Logs")
-with st.expander("Show Stream Diagnostic Logs", expanded=True):
-    if os.path.exists("/tmp/stream.log"):
-        with open("/tmp/stream.log", "r") as f:
-            log_lines = f.readlines()
-            st.code("".join(log_lines[-100:]), language="text")
-    else:
-        st.info("No logs generated yet. Start the stream to view logs.")
+st.components.v1.html(scaled_html, height=600)

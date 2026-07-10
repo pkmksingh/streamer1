@@ -3,7 +3,7 @@
 # Configuration
 URL=${STREAM_URL:-"https://datamk-trading-pulse.hf.space"}
 AUDIO_FILE=${AUDIO_FILE:-"Cool Revenge.mp3"}
-RESOLUTION=${RESOLUTION:-"3840x2160"}
+RESOLUTION=${RESOLUTION:-"1920x1080"}
 BITRATE=${BITRATE:-"15000k"}
 FPS=${FPS:-"30"}
 ZOOM=${ZOOM:-"1.5"}
@@ -16,7 +16,6 @@ cleanup() {
     echo "Cleaning up..."
     kill $(jobs -p) 2>/dev/null
     rm -f /tmp/.X99-lock
-    rm -rf /tmp/chrome-data-$$
 }
 trap cleanup EXIT
 
@@ -29,14 +28,13 @@ pactl set-default-sink dummy_sink 2>/dev/null || true
 
 # 2. Start Xvfb
 echo "Starting Xvfb on $DISPLAY_NUM with $RESOLUTION..."
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
-Xvfb $DISPLAY_NUM -screen 0 ${RESOLUTION}x${DEPTH} -ac +extension GLX +render -noreset &
+Xvfb $DISPLAY_NUM -screen 0 ${RESOLUTION}x${DEPTH} > /dev/null 2>&1 &
 sleep 2
 
 export DISPLAY=$DISPLAY_NUM
 
 
-# 3. Start Chromium in Kiosk Mode
+# 3. Start Chromium in Kiosk Mode (suppress all logs)
 echo "Starting Chromium in kiosk mode..."
 # Extract width and height from RESOLUTION (e.g., 3840x2160 -> 3840, 2160)
 W=$(echo $RESOLUTION | cut -d'x' -f1)
@@ -46,7 +44,7 @@ chromium \
     --no-sandbox \
     --disable-setuid-sandbox \
     --kiosk \
-    --user-data-dir=/tmp/chrome-data-$$ \
+    --user-data-dir=/tmp/chrome-data \
     --force-device-scale-factor=$ZOOM \
     --window-size=$W,$H \
     --window-position=0,0 \
@@ -56,13 +54,13 @@ chromium \
     --no-first-run \
     --hide-scrollbars \
     --autoplay-policy=no-user-gesture-required \
+    --no-zygote \
     --disable-gpu \
-    --disable-web-security \
-    --disable-features=IsolateOrigins,site-per-process \
+    --disable-features=VizDisplayCompositor \
     --remote-debugging-port=9222 \
-    --log-level=0 \
+    --log-level=3 \
     --silent-debugger-extension-api \
-    "$URL" &
+    "$URL" > /dev/null 2>&1 &
 sleep 30
 
 # 3. Start FFmpeg
@@ -98,33 +96,22 @@ while true; do
         
         # Extract hostname for DNS check
         HOSTNAME=$(echo "$URL" | sed -e 's|rtmp://||' -e 's|/.*||')
-        echo "Resolving DNS for $HOSTNAME using external resolvers..."
+        echo "Checking DNS for $HOSTNAME..."
         
-        # 1. Try dig with Cloudflare DNS
-        RESOLVED_IP=$(dig +short @1.1.1.1 "$HOSTNAME" | grep -E '^[0-9.]+$' | head -n1)
+        RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
         
-        # 2. Try dig with Google DNS
         if [ -z "$RESOLVED_IP" ]; then
-            RESOLVED_IP=$(dig +short @8.8.8.8 "$HOSTNAME" | grep -E '^[0-9.]+$' | head -n1)
-        fi
-        
-        # 3. Try Cloudflare DNS-over-HTTPS
-        if [ -z "$RESOLVED_IP" ]; then
+            echo "WARNING: System resolver failed for $HOSTNAME. Trying DNS-over-HTTPS (Cloudflare)..."
             RESOLVED_IP=$(curl -s -H "accept: application/dns-json" "https://cloudflare-dns.com/dns-query?name=$HOSTNAME&type=A" | jq -r '.Answer[0].data // empty')
-        fi
-        
-        # 4. Fallback to system resolver
-        if [ -z "$RESOLVED_IP" ] || [ "$RESOLVED_IP" = "null" ]; then
-            RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
-        fi
-
-        if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
-            echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP"
-            # Update URL to use IP
-            URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
-        else
-            echo "ERROR: DNS resolution failed for $HOSTNAME. Skipping this destination."
-            continue
+            
+            if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
+                echo "SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP via DoH."
+                # Update URL to use IP
+                URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
+            else
+                echo "ERROR: DoH resolution also failed for $HOSTNAME. Skipping this destination."
+                continue
+            fi
         fi
         RESOLVED_URLS+=("$URL")
         TEE_OUTPUTS+=("[f=flv]${URL}")
@@ -145,6 +132,7 @@ while true; do
             -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
             -g 60 -keyint_min 60 -sc_threshold 0 \
             $AUDIO_CODEC \
+            -map 0:v -map 1:a \
             -f flv "\"$SINGLE_URL\""
     else
         # Join TEE_OUTPUTS with '|'
@@ -164,7 +152,7 @@ while true; do
     echo "FFmpeg exited with code $FFMPEG_EXIT_CODE."
 
     # If killed by SIGINT (130) or SIGTERM (143)
-    if [ $FFMPEG_EXIT_CODE -eq 130 ] || [ $FFMPEG_EXIT_CODE -eq 143 ] || [ $FFMPEG_EXIT_CODE -eq 255 ]; then
+    if [ $FFMPEG_EXIT_CODE -eq 130 ] || [ $FFMPEG_EXIT_CODE -eq 143 ]; then
         echo "FFmpeg was terminated by user or system signal. Exiting stream script."
         break
     fi
