@@ -3,7 +3,7 @@
 # Configuration
 URL=${STREAM_URL:-"https://datamk-trading-pulse.hf.space"}
 AUDIO_FILE=${AUDIO_FILE:-"Cool Revenge.mp3"}
-RESOLUTION=${RESOLUTION:-"1920x1080"}
+RESOLUTION=${RESOLUTION:-"3840x2160"}
 BITRATE=${BITRATE:-"15000k"}
 FPS=${FPS:-"30"}
 ZOOM=${ZOOM:-"1.5"}
@@ -132,7 +132,6 @@ while true; do
             -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
             -g 60 -keyint_min 60 -sc_threshold 0 \
             $AUDIO_CODEC \
-            -map 0:v -map 1:a \
             -f flv "\"$SINGLE_URL\""
     else
         # Join TEE_OUTPUTS with '|'
@@ -152,7 +151,7 @@ while true; do
     echo "FFmpeg exited with code $FFMPEG_EXIT_CODE."
 
     # If killed by SIGINT (130) or SIGTERM (143)
-    if [ $FFMPEG_EXIT_CODE -eq 130 ] || [ $FFMPEG_EXIT_CODE -eq 143 ]; then
+    if [ $FFMPEG_EXIT_CODE -eq 130 ] || [ $FFMPEG_EXIT_CODE -eq 143 ] || [ $FFMPEG_EXIT_CODE -eq 255 ]; then
         echo "FFmpeg was terminated by user or system signal. Exiting stream script."
         break
     fi
