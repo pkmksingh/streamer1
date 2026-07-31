@@ -9,6 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # Global state
 CONFIG_FILE = "stream_config.json"
+LOG_FILE = "stream.log"
 DASHBOARD_URL = "https://datamk-trading-pulse.hf.space"
 
 def load_config():
@@ -99,6 +100,15 @@ def generate_wrapper_html(overlay_url):
         }}
         setInterval(updateTime, 1000);
         updateTime();
+
+        // Auto-refresh dashboard iframe every 30 minutes to prevent memory leaks or blank screen
+        setInterval(function() {{
+            const iframe = document.getElementById('dashboard');
+            if (iframe) {{
+                console.log("[wrapper] Periodic refresh of dashboard iframe");
+                iframe.src = iframe.src;
+            }}
+        }}, 30 * 60 * 1000);
     </script>
 </body>
 </html>"""
@@ -110,6 +120,7 @@ def init_monitor():
     class StreamManager:
         def __init__(self):
             self.stream_process = None
+            self.log_file_obj = None
             self.thread = threading.Thread(target=self.monitor_stream, daemon=True)
             self.thread.start()
             
@@ -135,6 +146,7 @@ def init_monitor():
                     print(f"[monitor] Keep-alive ping failed: {e}", flush=True)
                     
         def start_stream_logic(self, config):
+            self.stop_stream()
             env = os.environ.copy()
             generate_wrapper_html(config['overlay_url'])
             # Point Chrome to the locally generated wrapper.html
@@ -147,12 +159,15 @@ def init_monitor():
             env["USE_DUMMY_AUDIO"] = "0"  # use mp3 if available, else fallback
 
             try:
-                # Redirect output to /dev/null to avoid disk usage
-                devnull = open(os.devnull, "w")
+                log_f = open(LOG_FILE, "a")
+                log_f.write(f"\n--- Starting Stream Session at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                log_f.flush()
+                self.log_file_obj = log_f
+                
                 self.stream_process = subprocess.Popen(
                     ["bash", "./stream.sh"],
-                    stdout=devnull,
-                    stderr=devnull,
+                    stdout=log_f,
+                    stderr=log_f,
                     env=env,
                     preexec_fn=os.setsid
                 )
@@ -177,11 +192,14 @@ def init_monitor():
         def stop_stream(self):
             if self.stream_process and self.stream_process.pid:
                 try:
-                    os.killpg(os.getpgid(self.stream_process.pid), signal.SIGTERM)
-                except:
-                    pass
+                    pgid = os.getpgid(self.stream_process.pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    time.sleep(1)
+                    os.killpg(pgid, signal.SIGKILL)
+                except Exception as e:
+                    print(f"[monitor] Error stopping stream process group: {e}", flush=True)
                 self.stream_process = None
-                
+
         def is_running(self):
             return self.stream_process is not None and self.stream_process.poll() is None
             
@@ -217,11 +235,9 @@ else:
         st.error("⚫ Stopped — Stream disabled. Click Start to enable auto-restart mode.")
 
 with st.expander("Stream Configuration", expanded=True):
-    # Setup safe masking for display similar to the original JS function
     def mask_rtmp_url(url_string):
         if not url_string:
             return ""
-        # Split by comma or space
         urls = [u.strip() for u in url_string.replace(",", " ").split() if u.strip()]
         masked_urls = []
         for url in urls:
@@ -239,7 +255,6 @@ with st.expander("Stream Configuration", expanded=True):
         st.text_input("RTMP Destinations (Masked) 🔒", value=mask_rtmp_url(config.get("rtmp_url")), disabled=True, help="Protected — edit via Space Secrets (supports multiple comma-separated URLs)")
     with col_url2:
         overlay_val = config.get("overlay_url", "")
-        # truncate overlay for display as original did
         overlay_display = (overlay_val[:50] + "...") if len(overlay_val) > 50 else overlay_val
         st.text_input("Overlay URL 🔒", value=overlay_display, disabled=True, help="Protected — edit via Space Secrets")
 
@@ -298,3 +313,11 @@ scaled_html = f'''
 '''
 
 st.components.v1.html(scaled_html, height=600)
+
+with st.expander("Stream Logs 📋", expanded=False):
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            lines = f.readlines()
+            st.code("".join(lines[-100:]), language="text")
+    else:
+        st.info("No log entries recorded yet.")
