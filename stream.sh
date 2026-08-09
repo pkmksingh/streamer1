@@ -3,9 +3,9 @@
 # Configuration
 URL=${STREAM_URL:-"https://datamk-trading-pulse.hf.space"}
 AUDIO_FILE=${AUDIO_FILE:-"Cool Revenge.mp3"}
-RESOLUTION=${RESOLUTION:-"3840x2160"}
-BITRATE=${BITRATE:-"15000k"}
-FPS=${FPS:-"30"}
+RESOLUTION=${RESOLUTION:-"1920x1080"}
+BITRATE=${BITRATE:-"2500k"}
+FPS=${FPS:-"20"}
 ZOOM=${ZOOM:-"1.5"}
 DEPTH="24"
 DISPLAY_NUM=":99"
@@ -31,6 +31,10 @@ rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
 rm -rf /tmp/chrome-data/Singleton* 2>/dev/null || true
 sleep 1
 
+# Configure Google Public DNS for system resolver if permission allows
+echo "[stream.sh] Setting Google Public DNS (8.8.8.8 / 8.8.4.4)..."
+(echo "nameserver 8.8.8.8" > /etc/resolv.conf && echo "nameserver 8.8.4.4" >> /etc/resolv.conf) 2>/dev/null || true
+
 # 1. Start D-Bus and PulseAudio 
 echo "[stream.sh] Ensuring D-Bus and PulseAudio..."
 export $(dbus-launch) 2>/dev/null || true
@@ -50,12 +54,38 @@ xset s off 2>/dev/null || true
 xset -dpms 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
+# Helper: Google DNS & Google DoH Resolver
+resolve_google_dns() {
+    local target_host="$1"
+    local ip=""
+    
+    # 1. Query Google Primary DNS (8.8.8.8) via dig
+    ip=$(dig @8.8.8.8 +short +time=2 +tries=2 "$target_host" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+    
+    # 2. Query Google Secondary DNS (8.8.4.4) via dig
+    if [ -z "$ip" ]; then
+        ip=$(dig @8.8.4.4 +short +time=2 +tries=2 "$target_host" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+    fi
+    
+    # 3. Query Google DNS-over-HTTPS (DoH) API via curl
+    if [ -z "$ip" ]; then
+        ip=$(curl -s --max-time 4 "https://dns.google/resolve?name=$target_host&type=A" 2>/dev/null | jq -r '.Answer[]? | select(.type==1) | .data' 2>/dev/null | head -n 1)
+    fi
+
+    # 4. Fallback Google DoH via 8.8.8.8 IP direct
+    if [ -z "$ip" ] || [ "$ip" = "null" ]; then
+        ip=$(curl -s --max-time 4 -H "Host: dns.google" "https://8.8.8.8/resolve?name=$target_host&type=A" 2>/dev/null | jq -r '.Answer[]? | select(.type==1) | .data' 2>/dev/null | head -n 1)
+    fi
+
+    echo "$ip"
+}
+
 # 3. Chromium launcher & watchdog
 W=$(echo $RESOLUTION | cut -d'x' -f1)
 H=$(echo $RESOLUTION | cut -d'x' -f2)
 
 launch_chromium() {
-    echo "[stream.sh] Starting Chromium in kiosk mode ($URL)..."
+    echo "[stream.sh] Starting Chromium with Google DNS ($URL)..."
     rm -rf /tmp/chrome-data/Singleton* 2>/dev/null || true
     chromium \
         --no-sandbox \
@@ -77,6 +107,15 @@ launch_chromium() {
         --disk-cache-size=1 \
         --no-zygote \
         --disable-gpu \
+        --disable-software-rasterizer \
+        --renderer-process-limit=1 \
+        --js-flags="--max-old-space-size=256" \
+        --memory-pressure-off \
+        --disable-extensions \
+        --enable-async-dns \
+        --dns-server="8.8.8.8,8.8.4.4" \
+        --dns-over-https-mode=automatic \
+        --dns-over-https-templates="https://dns.google/dns-query{?dns}" \
         --remote-debugging-port=9222 \
         --log-level=3 \
         "$URL" > /dev/null 2>&1 &
@@ -129,19 +168,20 @@ while true; do
         fi
         
         HOSTNAME=$(echo "$URL" | sed -e 's|rtmp://||' -e 's|/.*||')
-        echo "[stream.sh] Checking DNS for $HOSTNAME..."
+        echo "[stream.sh] Resolving DNS for $HOSTNAME using Google DNS (8.8.8.8 / 8.8.4.4 / dns.google)..."
         
-        RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+        RESOLVED_IP=$(resolve_google_dns "$HOSTNAME")
         
-        if [ -z "$RESOLVED_IP" ]; then
-            echo "[stream.sh] WARNING: System resolver failed for $HOSTNAME. Trying DNS-over-HTTPS (Cloudflare)..."
-            RESOLVED_IP=$(curl -s -H "accept: application/dns-json" "https://cloudflare-dns.com/dns-query?name=$HOSTNAME&type=A" | jq -r '.Answer[0].data // empty')
-            
-            if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
-                echo "[stream.sh] SUCCESS: Resolved $HOSTNAME to $RESOLVED_IP via DoH."
+        if [ -n "$RESOLVED_IP" ] && [ "$RESOLVED_IP" != "null" ]; then
+            echo "[stream.sh] SUCCESS: Google DNS resolved $HOSTNAME -> $RESOLVED_IP"
+            URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
+        else
+            echo "[stream.sh] WARNING: Google DNS failed for $HOSTNAME. Trying system resolver fallback..."
+            RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+            if [ -n "$RESOLVED_IP" ]; then
                 URL=$(echo "$URL" | sed "s|$HOSTNAME|$RESOLVED_IP|")
             else
-                echo "[stream.sh] ERROR: DoH resolution also failed for $HOSTNAME. Skipping destination for this attempt."
+                echo "[stream.sh] ERROR: Could not resolve $HOSTNAME. Skipping destination."
                 continue
             fi
         fi
@@ -158,14 +198,16 @@ while true; do
     RETRY_COUNT=$((RETRY_COUNT + 1))
     echo "[stream.sh] Connection attempt #$RETRY_COUNT starting..."
 
+    KEYINT=$((FPS * 2))
+
     if [ ${#RESOLVED_URLS[@]} -eq 1 ]; then
         SINGLE_URL="${RESOLVED_URLS[0]}"
         echo "[stream.sh] Connecting FFmpeg stream to destination: $SINGLE_URL"
         ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
             "${AUDIO_INPUT_ARGS[@]}" \
             -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-            -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
-            -g 60 -keyint_min 60 -sc_threshold 0 \
+            -b:v $BITRATE -maxrate $BITRATE -bufsize 5000k \
+            -g $KEYINT -keyint_min $KEYINT -sc_threshold 0 \
             "${AUDIO_CODEC_ARGS[@]}" \
             -rw_timeout 10000000 \
             -f flv "$SINGLE_URL"
@@ -176,8 +218,8 @@ while true; do
         ffmpeg -f x11grab -draw_mouse 0 -video_size $RESOLUTION -framerate $FPS -i $DISPLAY_NUM.0+0,0 \
             "${AUDIO_INPUT_ARGS[@]}" \
             -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-            -b:v $BITRATE -minrate $BITRATE -maxrate $BITRATE -bufsize $BITRATE -nal-hrd cbr \
-            -g 60 -keyint_min 60 -sc_threshold 0 \
+            -b:v $BITRATE -maxrate $BITRATE -bufsize 5000k \
+            -g $KEYINT -keyint_min $KEYINT -sc_threshold 0 \
             "${AUDIO_CODEC_ARGS[@]}" \
             -rw_timeout 10000000 \
             -f tee -map 0:v -map 1:a "$JOINED_OUTPUTS"

@@ -25,8 +25,8 @@ def load_config():
         "enabled": True,
         "rtmp_url": os.environ.get("RTMP_URL", "rtmp://x.rtmp.youtube.com/live2/xfy3-p65p-p1hq-041p-buxw, rtmp://live.twitch.tv/app/live_1352303410_mZ5822JKsRM1U8Uw7B1xM5QK9OK8JX"),
         "resolution": os.environ.get("RESOLUTION", "1920x1080"),
-        "bitrate": os.environ.get("BITRATE", "5000k"),
-        "fps": os.environ.get("FPS", "30"),
+        "bitrate": os.environ.get("BITRATE", "2500k"),
+        "fps": os.environ.get("FPS", "20"),
         "zoom": os.environ.get("ZOOM", "1.5"),
         "overlay_url": os.environ.get("OVERLAY_URL",
             "https://streamelements.com/overlay/68ae13eaceb05ce7a084a618/JX6ewgq8Pmqkp6EvngSMZZEKAk5dSAGWDGsd1pH7ooSjaPsY")
@@ -159,6 +159,15 @@ def init_monitor():
             env["USE_DUMMY_AUDIO"] = "0"  # use mp3 if available, else fallback
 
             try:
+                if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > 2 * 1024 * 1024:
+                    try:
+                        with open(LOG_FILE, "r") as f:
+                            recent_lines = f.readlines()[-1000:]
+                        with open(LOG_FILE, "w") as f:
+                            f.writelines(recent_lines)
+                    except Exception:
+                        pass
+
                 log_f = open(LOG_FILE, "a")
                 log_f.write(f"\n--- Starting Stream Session at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
                 log_f.flush()
@@ -261,15 +270,15 @@ with st.expander("Stream Configuration", expanded=True):
     col1, col2, col3 = st.columns(3)
     with col1:
         res_options = ["3840x2160", "1920x1080", "1280x720"]
-        res_current = config.get("resolution", "3840x2160")
-        res_index = res_options.index(res_current) if res_current in res_options else 0
+        res_current = config.get("resolution", "1920x1080")
+        res_index = res_options.index(res_current) if res_current in res_options else 1
         resolution = st.selectbox("Resolution", res_options, index=res_index)
         
     with col2:
-        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "15000k"))
+        bitrate = st.text_input("Bitrate", value=config.get("bitrate", "2500k"))
         
     with col3:
-        fps = st.number_input("FPS", min_value=10, max_value=60, value=int(config.get("fps", 30)))
+        fps = st.number_input("FPS", min_value=10, max_value=60, value=int(config.get("fps", 20)))
 
     col_zoom, col_scale = st.columns(2)
     with col_zoom:
